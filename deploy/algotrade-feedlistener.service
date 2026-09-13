@@ -3,6 +3,7 @@ Description=AlgoTrade Unified Feed Listener (NIFTY/BANKNIFTY WebSocket)
 After=network.target
 
 [Service]
+Environment=PYTHONUNBUFFERED=1
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/algotrade-unified
