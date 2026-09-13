@@ -1,0 +1,15 @@
+[Unit]
+Description=AlgoTrade Unified Feed Listener (NIFTY/BANKNIFTY WebSocket)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/algotrade-unified
+EnvironmentFile=/home/ubuntu/algotrade-unified/.env
+ExecStart=/home/ubuntu/algotrade-unified/venv/bin/python -m scripts.run_feed_listener
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

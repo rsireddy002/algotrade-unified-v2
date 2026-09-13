@@ -1,0 +1,15 @@
+[Unit]
+Description=AlgoTrade Unified Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/algotrade-unified
+EnvironmentFile=/home/ubuntu/algotrade-unified/.env
+ExecStart=/home/ubuntu/algotrade-unified/venv/bin/streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
