@@ -11,15 +11,22 @@ Styled after the original "AlgoTrade Pro" mockup (dark slate/emerald/rose
 theme) — same visual language as breakout-scanner-streamlit, now backed by
 the unified platform instead of a standalone screener.
 
-NOT wired to the live WebSocket feed (core/feed_listener.py) — that needs
-a background thread feeding a shared state Streamlit can poll, which is
-its own reliability problem to get right and wasn't something I wanted to
-ship half-tested. Everything here runs on polled historical/intraday
-candles, the same proven pattern as breakout-scanner-streamlit. Live-tick
-integration (CVD, real-time hero cards) is a clearly separate future step.
+Scanner Grid can optionally read from a live-aggregated candle feed
+(scripts/run_live_scanner_feed.py -> data_cache/live_candles.json) instead
+of REST-polling, via core/live_candle_reader.py, with automatic fallback
+to REST when that file is missing/stale — e.g. when deployed somewhere
+(like Streamlit Community Cloud) that can't run a separate persistent
+background process. Everything else always runs on polled
+historical/intraday candles, same as before.
 
-Run:
+Run locally:
     streamlit run dashboard/app.py
+
+Deployed on Streamlit Community Cloud: secrets (UPSTOX_ACCESS_TOKEN etc.)
+come from Cloud's Secrets manager, not a .env file (that's gitignored on
+purpose) — the block right after the imports below bridges st.secrets
+into os.environ so core/auth.py's existing os.getenv() calls keep working
+unchanged, locally or deployed.
 """
 
 import os
@@ -32,6 +39,17 @@ import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Bridge Streamlit Cloud's Secrets manager into os.environ, so every
+# existing os.getenv("UPSTOX_ACCESS_TOKEN")-style call (core/auth.py, etc.)
+# keeps working unchanged whether running locally (.env file) or deployed
+# (Cloud secrets). Harmless no-op locally: st.secrets is empty when no
+# secrets.toml exists, and .setdefault() never overwrites a real .env value.
+try:
+    for _key, _value in st.secrets.items():
+        os.environ.setdefault(_key, str(_value))
+except Exception:
+    pass  # no secrets configured at all (e.g. fresh local clone, no .env yet) — fine, core.auth will raise its own clear error if a token is actually needed and missing
 
 from core.candle_store import get_daily_candles, get_intraday_candles
 from core.config import CORE_INDEX_SYMBOLS, IST
