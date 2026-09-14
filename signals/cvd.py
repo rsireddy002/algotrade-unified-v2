@@ -71,3 +71,26 @@ class CvdTracker:
         ltq = ltpc.get("ltq")
         if ltp is not None and ltq is not None:
             self.record_tick(ltp, ltq)
+
+
+def compute_candle_cvd(candles):
+    """Candle-level CVD approximation for pages that only have historical
+    OHLCV candles, not a live tick feed (e.g. a backtest/replay chart).
+
+    This is NOT the same as the tick-rule CVD above — it's a coarser
+    approximation: each candle's close is treated as one "tick" (compared
+    to the previous candle's close) and the whole candle's volume is
+    assigned to that single direction. A candle with a large range that
+    actually saw trading on both sides gets collapsed to one signed
+    delta. Real intraday tick data (via CvdTracker.record_tick per print)
+    is more accurate; use this only where tick data isn't available.
+
+    Returns a list of running cumulative-delta values, one per candle
+    (same length as `candles`, first value = ±first candle's volume).
+    """
+    tracker = CvdTracker()
+    series = []
+    for c in candles:
+        tracker.record_tick(c["close"], c["volume"])
+        series.append(tracker.state.cumulative_delta)
+    return series

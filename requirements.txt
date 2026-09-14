@@ -6,4 +6,5 @@ certifi>=2023.5.7
 anthropic>=0.40
 streamlit>=1.36
 plotly>=5.20
+streamlit-autorefresh>=1.0
 pandas>=2.0

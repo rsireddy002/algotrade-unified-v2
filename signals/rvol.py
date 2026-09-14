@@ -32,3 +32,14 @@ def compute_rvol(candles, lookback=10):
         rvol = current["volume"] / avg_volume
 
     return RvolResult(current_volume=current["volume"], average_volume=avg_volume, rvol=rvol)
+
+
+def compute_rvol_series(candles, lookback=10):
+    """RVOL for every candle from index `lookback` onward (each one vs.
+    the average of its own prior `lookback` candles) — for plotting RVOL
+    across a session rather than only reading the latest value. Returns a
+    list of RvolResult aligned to candles[lookback:], one entry shorter
+    than `candles` since the first `lookback` candles have no baseline."""
+    if len(candles) < lookback + 1:
+        return []
+    return [compute_rvol(candles[: i + 1], lookback=lookback) for i in range(lookback, len(candles))]

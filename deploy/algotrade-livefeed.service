@@ -1,0 +1,16 @@
+[Unit]
+Description=AlgoTrade Unified Live Scanner Feed (full F&O universe WebSocket -> live_candles.json)
+After=network.target
+
+[Service]
+Environment=PYTHONUNBUFFERED=1
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/algotrade-unified
+EnvironmentFile=/home/ubuntu/algotrade-unified/.env
+ExecStart=/home/ubuntu/algotrade-unified/venv/bin/python -m scripts.run_live_scanner_feed
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
