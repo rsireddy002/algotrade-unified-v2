@@ -104,6 +104,13 @@ st.markdown(
     .stTextInput input { color: #f1f5f9 !important; background-color: #1e293b !important;
                           border: 1px solid #334155 !important; }
     [data-testid="stDataFrame"] { background-color: #1e293b; }
+
+    /* Flash-on-change: briefly tints a hero card when its price changes
+       from the last value seen this session, then fades back out. */
+    .flash-up { animation: flashUp 0.4s ease-out; }
+    .flash-down { animation: flashDown 0.4s ease-out; }
+    @keyframes flashUp { 0% { background-color: rgba(34,197,94,0.35); } 100% { background-color: transparent; } }
+    @keyframes flashDown { 0% { background-color: rgba(239,68,68,0.35); } 100% { background-color: transparent; } }
     </style>
     """,
     unsafe_allow_html=True,
@@ -120,6 +127,26 @@ def get_trade_log():
     return PaperTradeLog(TRADE_LOG_PATH)
 
 
+def _sparkline_svg(values, width=100, height=26, color="#94a3b8"):
+    """Minimal sparkline: single desaturated line, no gridlines/axes —
+    used inside hero cards instead of a full mini chart."""
+    if not values or len(values) < 2:
+        return ""
+    lo, hi = min(values), max(values)
+    rng = (hi - lo) or 1
+    step = width / (len(values) - 1)
+    points = " ".join(
+        f"{i * step:.1f},{height - ((v - lo) / rng) * height:.1f}"
+        for i, v in enumerate(values)
+    )
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'style="margin-top:4px;display:block;">'
+        f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    )
+
+
 def render_hero_card(col, symbol):
     with col:
         try:
@@ -132,11 +159,24 @@ def render_hero_card(col, symbol):
             change_pct = (last["close"] - prev["close"]) / prev["close"] * 100
             css_class = "hero-change-up" if change_pct >= 0 else "hero-change-down"
             arrow = "▲" if change_pct >= 0 else "▼"
+
+            # Flash the card briefly when the price changes from the last
+            # value seen in this session (persists across Streamlit reruns
+            # via session_state; a fresh session simply shows no flash).
+            prev_seen = st.session_state.get(f"hero_last_price_{symbol}")
+            flash_class = ""
+            if prev_seen is not None and prev_seen != last["close"]:
+                flash_class = "flash-up" if last["close"] >= prev_seen else "flash-down"
+            st.session_state[f"hero_last_price_{symbol}"] = last["close"]
+
+            sparkline = _sparkline_svg([c["close"] for c in daily])
+
             st.markdown(
-                f"""<div class="hero-card">
+                f"""<div class="hero-card {flash_class}">
                     <div style="color:#94a3b8;font-size:0.9rem;">{symbol}</div>
                     <div class="hero-price">{last['close']:.2f}</div>
                     <div class="{css_class}">{arrow} {abs(change_pct):.2f}%</div>
+                    {sparkline}
                 </div>""",
                 unsafe_allow_html=True,
             )
