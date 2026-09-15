@@ -218,7 +218,7 @@ with tab_breakout:
 
         if results:
             df = pd.DataFrame([r.__dict__ for r in results]).sort_values("relative_volume", ascending=False)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
         else:
             st.info("No breakout signals found.")
         if errors:
@@ -253,7 +253,7 @@ with tab_fade:
 
         if found:
             df = pd.DataFrame([s.__dict__ for s in found])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
             for signal in found:
                 col1, col2 = st.columns([3, 1])
                 col1.write(f"{signal.ticker} @ {signal.entry_price:.2f} (stop {signal.stop_price:.2f})")
@@ -290,7 +290,7 @@ with tab_trades:
 
     if log.trades:
         df = pd.DataFrame([t.__dict__ for t in log.trades])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
         summary = log.summary()
         if summary["total_trades"] > 0:
             c1, c2, c3 = st.columns(3)
@@ -512,7 +512,7 @@ with tab_levels:
             fig.update_yaxes(title_text="Vol", gridcolor="#334155", row=2, col=1)
             fig.update_yaxes(title_text="CVD", gridcolor="#334155", row=3, col=1)
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         except Exception as exc:
             st.error(f"Could not compute levels at this replay position: {exc}")
@@ -613,7 +613,7 @@ def render_grid_card(col, symbol, key, full_candles, rvol_pct, log, source="rest
                 yaxis=dict(gridcolor="#334155"),
                 bargap=0.05,
             )
-            st.plotly_chart(fig, use_container_width=True, key=f"grid_chart_{symbol}")
+            st.plotly_chart(fig, width='stretch', key=f"grid_chart_{symbol}")
 
             cvd_colors = [
                 "#22c55e" if (i == 0 or cvd_series[i] >= cvd_series[i - 1]) else "#ef4444"
@@ -627,7 +627,7 @@ def render_grid_card(col, symbol, key, full_candles, rvol_pct, log, source="rest
                 yaxis=dict(gridcolor="#334155"),
                 bargap=0.05,
             )
-            st.plotly_chart(cvd_fig, use_container_width=True, key=f"grid_cvd_{symbol}")
+            st.plotly_chart(cvd_fig, width='stretch', key=f"grid_cvd_{symbol}")
 
             already_open = any(t.ticker == symbol and t.is_open for t in log.trades)
             daily = get_daily_candles(key, lookback_days=60)
