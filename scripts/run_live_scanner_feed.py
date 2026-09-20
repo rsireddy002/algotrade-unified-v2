@@ -56,6 +56,7 @@ from core.config import IST
 from core.feed_listener import FeedListener
 from core.instruments import get_fno_tickers, resolve_equity_key
 from signals.cvd import CvdTracker
+from core.tick_broadcaster import TickBroadcaster
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("run_live_scanner_feed")
@@ -67,6 +68,7 @@ OUTPUT_PATH = os.environ.get(
 DUMP_INTERVAL_SECONDS = 5
 
 aggregator = CandleAggregator()
+broadcaster = TickBroadcaster()
 cvd_trackers = {}  # symbol -> CvdTracker
 symbol_by_key = {}  # instrument_key -> symbol
 
@@ -111,6 +113,8 @@ def on_message(decoded):
         if ltq is not None:
             tracker = cvd_trackers.setdefault(symbol, CvdTracker())
             tracker.record_tick(ltp, ltq)
+
+        broadcaster.push_tick(symbol, ltp, ltq or 0)
 
 
 def on_status(message):
@@ -174,6 +178,7 @@ async def main():
     await listener.subscribe(all_keys, mode="full_d5")
 
     dump_task = asyncio.create_task(dump_loop())
+    broadcast_task = asyncio.create_task(broadcaster.start(host="0.0.0.0", port=8765))
 
     logger.info(f"Listening for ticks — writing snapshots to {OUTPUT_PATH} every {DUMP_INTERVAL_SECONDS}s...")
     try:
