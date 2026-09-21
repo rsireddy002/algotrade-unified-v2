@@ -25,12 +25,7 @@ def ist_date_string(dt=None):
     return dt.strftime("%Y-%m-%d")
 
 
-def _fetch_candles(instrument_key, unit, interval, from_date, to_date):
-    url = f"{UPSTOX_BASE}/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}"
-    payload = upstox_get(url)
-    rows = (payload.get("data") or {}).get("candles") or []
-
-    # Each row: [timestamp, open, high, low, close, volume, open_interest]
+def _rows_to_candles(rows):
     candles = [
         {
             "date": row[0],
@@ -47,15 +42,39 @@ def _fetch_candles(instrument_key, unit, interval, from_date, to_date):
     return candles
 
 
+def _fetch_candles(instrument_key, unit, interval, from_date, to_date):
+    url = f"{UPSTOX_BASE}/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}"
+    payload = upstox_get(url)
+    rows = (payload.get("data") or {}).get("candles") or []
+    return _rows_to_candles(rows)
+
+
+def _fetch_intraday_today(instrument_key, unit, interval):
+    """Today's still-open session. The historical endpoint above only
+    returns finalized/settled days (post-market consolidated data), so it
+    has no row for today until after settlement. This dedicated intraday
+    endpoint is the only source for the live, in-progress session."""
+    url = f"{UPSTOX_BASE}/v3/historical-candle/intraday/{instrument_key}/{unit}/{interval}"
+    payload = upstox_get(url)
+    rows = (payload.get("data") or {}).get("candles") or []
+    return _rows_to_candles(rows)
+
+
 def get_intraday_candles(instrument_key, unit="minutes", interval=5, lookback_days=10):
     """Native intraday candles for the last `lookback_days` calendar days,
-    with any still-forming candle dropped. Works for any Upstox-supported
-    interval (minutes 1-300, or hours 1-5) — not hardcoded to 5-minute like
-    the original breakout scanner, so CVD/footprint work at 1-min and
-    breakout screening can stay at 5-min from the same function."""
+    with any still-forming candle dropped. Merges in today's live session
+    from the intraday endpoint when the historical endpoint hasn't
+    finalized it yet, so replay/levels/breakout logic sees today's candles
+    during market hours instead of stopping at the last settled day."""
     to_date = ist_date_string()
     from_date = ist_date_string(datetime.now(tz=IST) - timedelta(days=lookback_days))
     candles = _fetch_candles(instrument_key, unit, interval, from_date, to_date)
+
+    today = ist_date_string()
+    if not candles or candles[-1]["date"][:10] != today:
+        today_candles = _fetch_intraday_today(instrument_key, unit, interval)
+        candles.extend(c for c in today_candles if c["date"][:10] == today)
+        candles.sort(key=lambda c: c["date"])
 
     now = datetime.now(tz=IST)
     interval_minutes = interval if unit == "minutes" else interval * 60
