@@ -419,4 +419,431 @@ with tab_levels:
                 f'<span class="low-confidence">⚠ Value area confidence: {va.confidence} — '
                 f'validated finding: VAH/VAL edges unreliable (62-71% overlap). '
                 f'VWAP/POC proxy is the more trustworthy level.</span>',
-    
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "CVD shown here is a candle-level approximation (each candle's close vs. "
+                "the prior close, whole-candle volume assigned to that side) — not true "
+                "tick-rule CVD, which needs the live feed. See signals/cvd.py."
+            )
+
+            # Candlestick + volume profile (top), Volume/RVOL (middle), CVD (bottom) —
+            # all sharing the same x-axis (time) so replay steps stay aligned across rows.
+            from plotly.subplots import make_subplots
+
+            # Category-type x-axis (below) needs plain labels, not raw ISO
+            # timestamps — HH:MM is enough since a session is always one day.
+            labels = [c["date"][11:16] for c in session_candles]
+            opens = [c["open"] for c in session_candles]
+            highs = [c["high"] for c in session_candles]
+            lows = [c["low"] for c in session_candles]
+            closes = [c["close"] for c in session_candles]
+            volumes = [c["volume"] for c in session_candles]
+
+            # Full session's timestamps, including bars replay hasn't
+            # revealed yet — used only to reserve category-axis width below.
+            full_day_labels = [c["date"][11:16] for c in session_all]
+
+            fig = make_subplots(
+                rows=3, cols=2, shared_xaxes=True, shared_yaxes=True,
+                row_heights=[0.55, 0.2, 0.25],
+                column_widths=[0.78, 0.22], horizontal_spacing=0.01, vertical_spacing=0.03,
+                specs=[
+                    [{"type": "candlestick"}, {"type": "bar"}],
+                    [{"type": "bar"}, None],
+                    [{"type": "bar"}, None],
+                ],
+            )
+
+            # Invisible placeholder points at every timestamp in the full
+            # session, added before the real traces so category ordering
+            # locks in the whole day up front. Without this, a category-type
+            # x-axis only knows about the bars actually revealed by replay
+            # and stretches those few bars to fill the entire chart width.
+            for _row in (1, 2, 3):
+                fig.add_trace(
+                    go.Scatter(
+                        x=full_day_labels, y=[None] * len(full_day_labels),
+                        mode="markers", marker=dict(opacity=0),
+                        showlegend=False, hoverinfo="skip",
+                    ),
+                    row=_row, col=1,
+                )
+
+            fig.add_trace(
+                go.Candlestick(
+                    x=labels, open=opens, high=highs, low=lows, close=closes,
+                    increasing_line_color="#22c55e", increasing_fillcolor="#22c55e",
+                    decreasing_line_color="#ef4444", decreasing_fillcolor="#ef4444",
+                    name=ticker_upper, showlegend=False,
+                ),
+                row=1, col=1,
+            )
+
+            for level_price, label, color in [
+                (poc_proxy, "VWAP/POC proxy", "#10b981"),
+                (va.vah, "VAH", "#f59e0b"),
+                (va.val, "VAL", "#f59e0b"),
+            ]:
+                fig.add_hline(
+                    y=level_price, line_color=color, line_dash="dot" if label != "VWAP/POC proxy" else "solid",
+                    annotation_text=label, annotation_position="right",
+                    row=1, col=1,
+                )
+
+            fig.add_trace(
+                go.Bar(
+                    x=[b.volume for b in profile.bins],
+                    y=[b.mid for b in profile.bins],
+                    orientation="h",
+                    marker_color="#475569",
+                    showlegend=False,
+                ),
+                row=1, col=2,
+            )
+
+            # Volume bars colored by RVOL — bars above 1x baseline (busier than
+            # average) stand out in amber, the rest in slate. Early bars in a
+            # short session may lack a full RVOL lookback; those fall back to slate.
+            colored = ["#f59e0b" if r.rvol >= 1.0 else "#475569" for r in rvol_series]
+            n_missing = len(volumes) - len(colored)
+            rvol_colors = (["#475569"] * n_missing + colored) if n_missing > 0 else colored
+            fig.add_trace(
+                go.Bar(x=labels, y=volumes, marker_color=rvol_colors, showlegend=False, name="Volume (RVOL-colored)"),
+                row=2, col=1,
+            )
+
+            # CVD as bars (height = cumulative running total, not per-candle
+            # delta) — colored green where the running total rose from the
+            # previous bar, red where it fell.
+            cvd_colors = [
+                "#22c55e" if (i == 0 or cvd_series[i] >= cvd_series[i - 1]) else "#ef4444"
+                for i in range(len(cvd_series))
+            ]
+            fig.add_trace(
+                go.Bar(x=labels, y=cvd_series, marker_color=cvd_colors, showlegend=False, name="CVD (candle approx.)"),
+                row=3, col=1,
+            )
+            fig.add_hline(y=0, line_color="#64748b", line_width=1, row=3, col=1)
+
+            fig.update_layout(
+                paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#cbd5e1",
+                height=750, margin=dict(l=20, r=20, t=20, b=20),
+                bargap=0.05,  # bars fill nearly all their allotted width
+            )
+            # type="category" (not the default date/time axis) removes the
+            # off-hours gaps that were squeezing candles into the left portion
+            # of the plot and stretches every bar to fill its slot evenly.
+            fig.update_xaxes(type="category", rangeslider_visible=False, gridcolor="#334155", row=1, col=1)
+            fig.update_xaxes(title_text="Volume", gridcolor="#334155", row=1, col=2)
+            fig.update_xaxes(type="category", gridcolor="#334155", row=2, col=1)
+            fig.update_xaxes(type="category", gridcolor="#334155", row=3, col=1)
+            fig.update_yaxes(title_text="Price", gridcolor="#334155", row=1, col=1)
+            fig.update_yaxes(showticklabels=False, row=1, col=2)
+            fig.update_yaxes(title_text="Vol", gridcolor="#334155", row=2, col=1)
+            fig.update_yaxes(title_text="CVD", gridcolor="#334155", row=3, col=1)
+
+            st.plotly_chart(fig, width='stretch')
+
+        except Exception as exc:
+            st.error(f"Could not compute levels at this replay position: {exc}")
+
+# --- Scanner Grid tab -------------------------------------------------------------
+# Multi-symbol card grid, modeled on the dryarapureddy-tick-ML scanner-app's
+# layout (compact chart + level lines + a small delta panel + SL/Target +
+# Buy/Sell, several cards per row) — but built entirely from signals already
+# in this platform (RVOL, VWAP/POC proxy, value area, candle-approx CVD, ATR).
+# Deliberately NOT the ML-zone-break-risk version from that app (composite
+# 18-day zones, cross-timeframe validation, zone_break_model.pkl) — that's
+# a separate, larger port; see conversation history if picking that up later.
+GRID_ATR_PERIOD = 14
+GRID_COLS_PER_ROW = 2
+
+
+def _latest_day_candles(candles):
+    """Slice a multi-day intraday candle list down to just the most recent
+    trading day — get_intraday_candles fetches ~10 calendar days by
+    default, but a grid card should chart one session, not all of them
+    overlaid (see conversation: HH:MM-only labels on a category x-axis
+    collapse every day's candles onto the same ~75 slots otherwise)."""
+    if not candles:
+        return candles
+    latest_day = candles[-1]["date"][:10]
+    start = next(i for i, c in enumerate(candles) if c["date"][:10] == latest_day)
+    return candles[start:]
+
+
+def _scan_one_for_rvol(symbol):
+    """Used by the universe scan below: resolve + fetch once, return
+    everything the grid needs so the per-card render step doesn't have to
+    re-fetch the same candles a second time.
+
+    Tries the live feed first — if scripts/run_live_scanner_feed.py has
+    accumulated enough of today's bars, this needs zero REST calls. But
+    the live aggregator only ever holds TODAY's candles (it starts empty
+    each process launch), while RVOL's lookback baseline needs bars from
+    BEFORE now — so live-only RVOL only becomes usable roughly
+    RVOL_LOOKBACK * 5 minutes into the session. Before that (or if the
+    live feed isn't running/stale/hasn't reached this symbol yet), this
+    falls back to the REST multi-day fetch, unchanged from before.
+
+    Also checks for a VWAP/POC proxy cross on today's session (see
+    signals/poc_cross.py) using the same fetched candles — no extra fetch.
+
+    Returns (symbol, key, candles, rvol, source, poc_cross) — 'source' is
+    "live" or "rest", surfaced in the UI so it's never a silent guess
+    which one ran; 'poc_cross' is a PocCrossSignal if the latest bar just
+    crossed the level, else None."""
+    key = resolve_equity_key(symbol)
+
+    try:
+        live_candles = get_live_candles(symbol)
+        if len(live_candles) >= RVOL_LOOKBACK + 1:
+            rvol = compute_rvol(live_candles, lookback=RVOL_LOOKBACK)
+            cross = detect_poc_cross(symbol, _latest_day_candles(live_candles))
+            return symbol, key, live_candles, rvol.rvol, "live", cross
+    except LiveFeedUnavailable:
+        pass  # fall through to REST below
+
+    candles = get_intraday_candles(key, unit="minutes", interval=5)
+    if len(candles) < RVOL_LOOKBACK + 1:
+        return None
+    rvol = compute_rvol(candles, lookback=RVOL_LOOKBACK)
+    cross = detect_poc_cross(symbol, _latest_day_candles(candles))
+    return symbol, key, candles, rvol.rvol, "rest", cross
+
+
+def render_grid_card(col, symbol, key, full_candles, rvol_pct, log, source="rest", cross=None):
+    with col:
+        try:
+            candles = _latest_day_candles(full_candles)  # today only — see _latest_day_candles
+
+            if cross:
+                arrow = "🔼" if cross.direction == "above" else "🔽"
+                badge_color = "#22c55e" if cross.direction == "above" else "#ef4444"
+                st.markdown(
+                    f'<div style="background:{badge_color}22;border:1px solid {badge_color};'
+                    f'border-radius:6px;padding:4px 10px;margin-bottom:6px;color:{badge_color};'
+                    f'font-weight:600;font-size:0.85rem;">{arrow} Just crossed {cross.direction} '
+                    f'VWAP/POC proxy ({cross.close:.2f} vs {cross.poc_proxy:.2f})</div>',
+                    unsafe_allow_html=True,
+                )
+
+            profile = build_volume_profile(candles, num_bins=20)
+            va = compute_value_area(candles, num_bins=20)
+            poc_proxy = vwap_poc_proxy(candles)
+            cvd_series = compute_candle_cvd(candles)
+            last_close = candles[-1]["close"]
+
+            labels = [c["date"][11:16] for c in candles]
+            opens = [c["open"] for c in candles]
+            highs = [c["high"] for c in candles]
+            lows = [c["low"] for c in candles]
+            closes = [c["close"] for c in candles]
+
+            fig = go.Figure(
+                data=[
+                    go.Candlestick(
+                        x=labels, open=opens, high=highs, low=lows, close=closes,
+                        increasing_line_color="#22c55e", increasing_fillcolor="#22c55e",
+                        decreasing_line_color="#ef4444", decreasing_fillcolor="#ef4444",
+                        showlegend=False,
+                    )
+                ]
+            )
+            for level_price, dash in [(poc_proxy, "solid"), (va.vah, "dot"), (va.val, "dot")]:
+                fig.add_hline(y=level_price, line_color="#f59e0b" if dash == "dot" else "#10b981", line_dash=dash)
+            fig.update_layout(
+                title=dict(
+                    text=f"{symbol} (RVOL {rvol_pct:.0f}%) · {'🟢 live' if source == 'live' else 'REST'}",
+                    font=dict(color="#f1f5f9", size=14),  # explicit — title text doesn't inherit font_color
+                ),
+                paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#cbd5e1",
+                height=260, margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(type="category", rangeslider_visible=False, gridcolor="#334155"),
+                yaxis=dict(gridcolor="#334155"),
+                bargap=0.05,
+            )
+            st.plotly_chart(fig, width='stretch', key=f"grid_chart_{symbol}")
+
+            cvd_colors = [
+                "#22c55e" if (i == 0 or cvd_series[i] >= cvd_series[i - 1]) else "#ef4444"
+                for i in range(len(cvd_series))
+            ]
+            cvd_fig = go.Figure(data=[go.Bar(x=labels, y=cvd_series, marker_color=cvd_colors, showlegend=False)])
+            cvd_fig.update_layout(
+                paper_bgcolor="#1e293b", plot_bgcolor="#1e293b", font_color="#cbd5e1",
+                height=80, margin=dict(l=10, r=10, t=5, b=5),
+                xaxis=dict(type="category", showticklabels=False, gridcolor="#334155"),
+                yaxis=dict(gridcolor="#334155"),
+                bargap=0.05,
+            )
+            st.plotly_chart(cvd_fig, width='stretch', key=f"grid_cvd_{symbol}")
+
+            already_open = any(t.ticker == symbol and t.is_open for t in log.trades)
+            daily = get_daily_candles(key, lookback_days=60)
+            atr_val = compute_atr(daily, period=GRID_ATR_PERIOD).atr if len(daily) >= GRID_ATR_PERIOD + 1 else None
+
+            bcol, scol = st.columns(2)
+            with bcol:
+                # Long candidate: VAL as the natural stop (mean-reversion up
+                # off the low of the value area), ATR-multiple target.
+                if last_close > va.val and atr_val:
+                    target = atr_based_target(last_close, atr_val, "long")
+                    st.caption(f"SL {va.val:.1f} / T {target:.1f}")
+                    if st.button("Buy", key=f"grid_buy_{symbol}", disabled=already_open):
+                        log.open_trade(symbol, "long", last_close, va.val, target, candles[-1]["date"])
+                        st.success(f"LONG opened: {symbol}")
+                else:
+                    st.caption("No valid long setup")
+            with scol:
+                # Short candidate: VAH as the natural stop, ATR-multiple target.
+                if last_close < va.vah and atr_val:
+                    target = atr_based_target(last_close, atr_val, "short")
+                    st.caption(f"SL {va.vah:.1f} / T {target:.1f}")
+                    if st.button("Sell", key=f"grid_sell_{symbol}", disabled=already_open):
+                        log.open_trade(symbol, "short", last_close, va.vah, target, candles[-1]["date"])
+                        st.success(f"SHORT opened: {symbol}")
+                else:
+                    st.caption("No valid short setup")
+            if already_open:
+                st.caption("⚠ Already have an open paper trade in this symbol.")
+
+        except Exception as exc:
+            st.write(f"{symbol}: could not render — {exc}")
+
+
+def _run_universe_scan():
+    tickers = get_fno_tickers()
+    scanned = []
+    with st.spinner(f"Scanning {len(tickers)} tickers for RVOL..."):
+        with ThreadPoolExecutor(max_workers=3) as executor:  # Cloudflare-safe concurrency
+            futures = {executor.submit(_scan_one_for_rvol, t): t for t in tickers}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result:
+                        scanned.append(result)
+                except Exception:
+                    continue  # a single ticker's failure shouldn't block the scan
+    scanned.sort(key=lambda r: r[3], reverse=True)  # rank by rvol, descending
+    st.session_state.scanner_grid_results = scanned
+    st.session_state.scanner_grid_last_scan = datetime.now(tz=IST)
+
+    # VWAP/POC proxy cross alerts. Dedup by (symbol, candle_date) via
+    # get_poc_alert_store() so re-scanning within the same still-forming
+    # candle (manual re-click, or an auto-refresh tick) doesn't re-send a
+    # Telegram message for a cross we already alerted on — only a
+    # genuinely new candle's cross fires again.
+    alert_store = get_poc_alert_store()
+    new_alerts = []
+    for symbol, _key, _candles, _rvol_pct, _source, cross in scanned:
+        if cross and alert_store.record(cross.symbol, cross.candle_date):
+            new_alerts.append(cross)
+    st.session_state.scanner_grid_new_alerts = new_alerts
+    for cross in new_alerts:
+        arrow = "🔼" if cross.direction == "above" else "🔽"
+        send_telegram_alert(
+            f"{arrow} {cross.symbol} crossed {cross.direction} VWAP/POC proxy "
+            f"— {cross.close:.2f} vs {cross.poc_proxy:.2f} — {cross.candle_date}"
+        )
+
+
+with tab_scanner:
+    st.subheader("Scanner Grid")
+    st.caption(
+        "Ranks the full F&O universe by RVOL, then shows the top N as chart cards — "
+        "same layout idea as the dryarapureddy-tick-ML scanner-app, but using this "
+        "platform's own signals (VWAP/POC proxy, value area, candle-approx CVD, ATR) "
+        "rather than that app's ML zone-break-risk model."
+    )
+
+    is_live, live_age, live_symbol_count = live_feed_status()
+    if is_live:
+        st.success(
+            f"🟢 Live feed active — {live_symbol_count} symbols, snapshot {live_age:.0f}s old. "
+            "Cards for symbols with enough of today's bars use this (zero REST calls); "
+            "others fall back to REST until enough live history accumulates."
+        )
+    else:
+        st.info(
+            "Live feed not detected (scripts/run_live_scanner_feed.py not running, or "
+            "data_cache/live_candles.json is stale) — every card will use REST polling."
+        )
+
+    top_n = st.number_input("Show top N by RVOL", min_value=4, max_value=40, value=12, step=2)
+
+    autocol1, autocol2 = st.columns([1, 2])
+    with autocol1:
+        auto_refresh_on = st.checkbox("Auto-refresh", key="scanner_grid_autorefresh_enabled")
+    with autocol2:
+        if auto_refresh_on:
+            refresh_secs = st.number_input(
+                "Every N seconds", min_value=15, max_value=600, value=60, step=15,
+                key="scanner_grid_refresh_secs",
+            )
+            st.caption(
+                "⚠ Reruns the WHOLE app on this timer, not just this tab — "
+                "Streamlit re-executes top to bottom regardless of which tab is visually "
+                "active, so in-progress state elsewhere (e.g. a Levels & Volume Profile "
+                "replay position) will keep re-rendering at its current position on every "
+                "tick rather than being disturbed, but any *unsaved* selection you're "
+                "mid-change on could get reset. Turn it off while actively using another tab."
+            )
+
+    if auto_refresh_on:
+        from streamlit_autorefresh import st_autorefresh
+        tick_count = st_autorefresh(interval=refresh_secs * 1000, key="scanner_grid_autorefresh_timer")
+    else:
+        tick_count = None
+
+    manual_click = st.button("Scan universe", key="scan_grid")
+
+    # st_autorefresh's tick_count only increments on its OWN timer — but
+    # Streamlit reruns this whole script on ANY widget interaction anywhere
+    # in the app (e.g. moving the Levels tab's replay slider). Comparing
+    # against the last-seen tick avoids re-scanning the full 200-stock
+    # universe on every unrelated rerun — only a genuine timer tick (or the
+    # manual button, or turning auto-refresh on for the first time with no
+    # results yet) triggers a rescan.
+    should_scan = manual_click
+    if auto_refresh_on:
+        prev_tick = st.session_state.get("scanner_grid_prev_tick")
+        if prev_tick != tick_count:
+            st.session_state.scanner_grid_prev_tick = tick_count
+            should_scan = True
+        elif "scanner_grid_results" not in st.session_state:
+            should_scan = True
+
+    if should_scan:
+        _run_universe_scan()
+
+    last_scan = st.session_state.get("scanner_grid_last_scan")
+    if last_scan:
+        st.caption(f"Last scanned: {last_scan.strftime('%I:%M:%S %p')} IST")
+
+    new_alerts = st.session_state.get("scanner_grid_new_alerts") or []
+    if new_alerts:
+        alert_line = ", ".join(
+            f"{c.symbol} ({'↑' if c.direction == 'above' else '↓'})" for c in new_alerts
+        )
+        st.warning(f"🔔 VWAP/POC proxy cross this scan: {alert_line}")
+
+    results = st.session_state.get("scanner_grid_results")
+    if results:
+        top_results = results[:top_n]
+        log = get_trade_log()
+        for i in range(0, len(top_results), GRID_COLS_PER_ROW):
+            row = top_results[i:i + GRID_COLS_PER_ROW]
+            cols = st.columns(len(row))
+            for col, (symbol, key, candles, rvol_pct, source, cross) in zip(cols, row):
+                render_grid_card(col, symbol, key, candles, rvol_pct, log, source=source, cross=cross)
+    else:
+        st.info("Click \"Scan universe\" to rank the F&O universe by RVOL and load the grid.")
+
+st.markdown(
+    '<div style="text-align:center;color:#64748b;font-size:0.8rem;margin-top:2rem;'
+    'padding-top:1rem;border-top:1px solid #334155;">'
+    'For educational and research purposes only. Not financial advice.</div>',
+    unsafe_allow_html=True,
+)
