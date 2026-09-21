@@ -428,6 +428,10 @@ with tab_levels:
             closes = [c["close"] for c in session_candles]
             volumes = [c["volume"] for c in session_candles]
 
+            # Full session's timestamps, including bars replay hasn't
+            # revealed yet — used only to reserve category-axis width below.
+            full_day_labels = [c["date"][11:16] for c in session_all]
+
             fig = make_subplots(
                 rows=3, cols=2, shared_xaxes=True, shared_yaxes=True,
                 row_heights=[0.55, 0.2, 0.25],
@@ -438,6 +442,21 @@ with tab_levels:
                     [{"type": "bar"}, None],
                 ],
             )
+
+            # Invisible placeholder points at every timestamp in the full
+            # session, added before the real traces so category ordering
+            # locks in the whole day up front. Without this, a category-type
+            # x-axis only knows about the bars actually revealed by replay
+            # and stretches those few bars to fill the entire chart width.
+            for _row in (1, 2, 3):
+                fig.add_trace(
+                    go.Scatter(
+                        x=full_day_labels, y=[None] * len(full_day_labels),
+                        mode="markers", marker=dict(opacity=0),
+                        showlegend=False, hoverinfo="skip",
+                    ),
+                    row=_row, col=1,
+                )
 
             fig.add_trace(
                 go.Candlestick(
